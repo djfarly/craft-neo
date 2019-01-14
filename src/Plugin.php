@@ -1,6 +1,7 @@
 <?php
 namespace benf\neo;
 
+use benf\neo\listeners\CraftQLGetFieldSchema;
 use yii\base\Event;
 
 use Craft;
@@ -87,6 +88,11 @@ class Plugin extends BasePlugin
 			->onAdd('neoBlockTypeGroups.{uid}', [$this->blockTypes, 'handleChangedBlockTypeGroup'])
 			->onUpdate('neoBlockTypeGroups.{uid}', [$this->blockTypes, 'handleChangedBlockTypeGroup'])
 			->onRemove('neoBlockTypeGroups.{uid}', [$this->blockTypes, 'handleDeletedBlockTypeGroup']);
+		Event::on(
+		    Field::class,
+            'craftQlGetFieldSchema',
+            [CraftQLGetFieldSchema::class, 'handle']
+        );
 
 		if (class_exists('\NerdsAndCompany\Schematic\Schematic')) {
 			Event::on(
