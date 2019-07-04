@@ -19,6 +19,7 @@ use benf\neo\elements\db\BlockQuery;
 use benf\neo\models\BlockStructure;
 use benf\neo\models\BlockType;
 use benf\neo\models\BlockTypeGroup;
+use benf\neo\validators\FieldValidator;
 
 /**
  * Class Field
@@ -62,6 +63,21 @@ class Field extends BaseField implements EagerLoadingFieldInterface
 	public $localizeBlocks = false;
 
 	/**
+	 * @var int|null The minimum number of blocks this field can have.
+	 */
+	public $minBlocks;
+
+	/**
+	 * @var int|null The maximum number of blocks this field can have.
+	 */
+	public $maxBlocks;
+
+	/**
+	 * @var int|null The maximum number of top-level blocks this field can have.
+	 */
+	public $maxTopBlocks;
+
+	/**
 	 * @var array|null The block types associated with this field.
 	 */
 	private $_blockTypes;
@@ -77,20 +93,10 @@ class Field extends BaseField implements EagerLoadingFieldInterface
 	public function rules(): array
 	{
 		$rules = parent::rules();
-		$rules[] = [['minBlocks', 'maxBlocks'], 'integer', 'min' => 0];
+		$rules[] = [['minBlocks', 'maxBlocks', 'maxTopBlocks'], 'integer', 'min' => 0];
 
 		return $rules;
 	}
-
-	/**
-	 * @var int|null The minimum number of blocks this field can have.
-	 */
-	public $minBlocks;
-
-	/**
-	 * @var int|null The maximum number of blocks this field can have.
-	 */
-	public $maxBlocks;
 
 	/**
 	 * Returns this field's block types.
@@ -156,6 +162,22 @@ class Field extends BaseField implements EagerLoadingFieldInterface
 
 					$fieldLayout = Craft::$app->getFields()->assembleLayout($fieldLayoutPost, $requiredFieldPost);
 					$fieldLayout->type = Block::class;
+
+					// Ensure the field layout ID is set, if it exists
+					if (is_int($blockTypeId))
+					{
+						$layoutIdResult = (new Query)
+							->select(['fieldLayoutId'])
+							->from('{{%neoblocktypes}}')
+							->where(['id' => $blockTypeId])
+							->one();
+
+						if ($layoutIdResult !== null)
+						{
+							$fieldLayout->id = $layoutIdResult['fieldLayoutId'];
+						}
+					}
+
 					$newBlockType->setFieldLayout($fieldLayout);
 				}
 			}
@@ -348,10 +370,18 @@ class Field extends BaseField implements EagerLoadingFieldInterface
 			{
 				$elements = $this->_createBlocksFromSerializedData($value, $element);
 
-				$query->anyStatus();
+				if (!Craft::$app->getRequest()->getIsLivePreview())
+				{
+					$query->anyStatus();
+				}
+				else
+				{
+					$query->status = Element::STATUS_ENABLED;
+				}
+
 				$query->limit = null;
 				$query->setCachedResult($elements);
-				$query->setAllElements($elements);
+				$query->useMemoized($elements);
 			}
 		}
 
@@ -431,6 +461,11 @@ class Field extends BaseField implements EagerLoadingFieldInterface
 				'tooFew' => Craft::t('neo', '{attribute} should contain at least {min, number} {min, plural, one{block} other{blocks}}.'),
 				'tooMany' => Craft::t('neo', '{attribute} should contain at most {max, number} {max, plural, one{block} other{blocks}}.'),
 				'skipOnEmpty' => false,
+				'on' => Element::SCENARIO_LIVE,
+			],
+			[
+				FieldValidator::class,
+				'maxTopBlocks' => $this->maxTopBlocks ?: null,
 				'on' => Element::SCENARIO_LIVE,
 			],
 		];
@@ -832,6 +867,7 @@ class Field extends BaseField implements EagerLoadingFieldInterface
 
 				$isEnabled = isset($blockData['enabled']) ? (bool)$blockData['enabled'] : true;
 				$isCollapsed = isset($blockData['collapsed']) ? (bool)$blockData['collapsed'] : false;
+				$isModified = isset($blockData['modified']) ? (bool)$blockData['modified'] : false;
 				$isNew = strpos($blockId, 'new') === 0;
 				$isDeleted = !isset($oldBlocksById[$blockId]);
 
@@ -860,6 +896,7 @@ class Field extends BaseField implements EagerLoadingFieldInterface
 
 					$block->setOwner($element);
 					$block->setCollapsed($isCollapsed);
+					$block->setModified($isModified);
 					$block->enabled = $isEnabled;
 					$block->level = $blockLevel;
 
